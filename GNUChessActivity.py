@@ -1,6 +1,6 @@
-#Copyright (c) 2012-14 Walter Bender
-#Copyright (c) 2012 Ignacio Rodriguez
-#Copyright (c) 2012 Aneesh Dogra <lionaneesh@gmail.com>
+# Copyright (c) 2012-14 Walter Bender
+# Copyright (c) 2012 Ignacio Rodriguez
+# Copyright (c) 2012 Aneesh Dogra <lionaneesh@gmail.com>
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -10,6 +10,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this library; if not, write to the Free Software
 # Foundation, 51 Franklin Street, Suite 500 Boston, MA 02110-1335 USA
+
+
+gi.require_version('Gtk', '3.0')
 
 from gi.repository import Gtk, Gdk, GObject
 
@@ -33,7 +36,11 @@ from toolbar_utils import button_factory, label_factory, separator_factory, \
 from utils import json_load, json_dump, get_hardware, \
     pixbuf_to_base64, base64_to_pixbuf
 
-import telepathy
+from gi.repository import TelepathyGLib
+
+CHANNEL_TYPE_TUBES = TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES
+TUBE_TYPE_DBUS = TelepathyGLib.IFACE_CHANNEL_TYPE_DBUS_TUBE
+
 import dbus
 from dbus.service import signal
 from dbus.gobject_service import ExportedGObject
@@ -72,7 +79,7 @@ class GNUChessActivity(activity.Activity):
         ''' Initialize the toolbars and the gnuchess '''
         try:
             super(GNUChessActivity, self).__init__(handle)
-        except dbus.exceptions.DBusException, e:
+        except dbus.exceptions.DBusException as e:
             _logger.error(str(e))
 
         self.game_data = None
@@ -136,10 +143,10 @@ class GNUChessActivity(activity.Activity):
         else:
             self._gnuchess.new_game()
         self._restoring = False
- 
+
     def _alert_cancel_cb(self, alert, response_id):
         self.remove_alert(alert)
-    
+
     def restore_cursor(self):
         ''' No longer thinking, so restore standard cursor. '''
         self.get_window().set_cursor(self.old_cursor)
@@ -354,7 +361,7 @@ class GNUChessActivity(activity.Activity):
         toolbox.toolbar.insert(stop_button, -1)
         stop_button.show()
 
-        for piece in PIECES.keys():
+        for piece in list(PIECES.keys()):
             for color in ['white', 'black']:
                 button_factory('%s-%s' % (color, piece),
                                self.custom_toolbar,
@@ -363,7 +370,7 @@ class GNUChessActivity(activity.Activity):
                                tooltip=PIECES[piece][color])
 
     def do_default_skin_cb(self, button=None):
-        for piece in PIECES.keys():
+        for piece in list(PIECES.keys()):
             for color in ['white', 'black']:
                 self._gnuchess.reskin_from_file(
                     '%s_%s' % (color, piece),
@@ -371,12 +378,12 @@ class GNUChessActivity(activity.Activity):
                                             color, piece))
 
     def _black_pieces(self, colors):
-        for piece in PIECES.keys():
+        for piece in list(PIECES.keys()):
             self._gnuchess.reskin_from_svg('black_%s' % piece, colors,
                                            bw='#000000')
 
     def _white_pieces(self, colors):
-        for piece in PIECES.keys():
+        for piece in list(PIECES.keys()):
             self._gnuchess.reskin_from_svg('white_%s' % piece, colors,
                                            bw='#ffffff')
 
@@ -398,7 +405,7 @@ class GNUChessActivity(activity.Activity):
                 self._white_pieces(colors)
 
     def do_custom_skin_cb(self, button=None):
-        for piece in PIECES.keys():
+        for piece in list(PIECES.keys()):
             for color in ['white', 'black']:
                 name = '%s_%s' % (color, piece)
                 if name in self.metadata:
@@ -436,11 +443,11 @@ class GNUChessActivity(activity.Activity):
         self.timer_tooltips = ['', _('30 seconds'), _('3 minutes'),
                                _('10 minutes')]
         self.timer_labels = [_('Disabled'),
-                             #TRANS: Lightning chess 30 seconds between moves
+                             # TRANS: Lightning chess 30 seconds between moves
                              _('Lightning: %d seconds') % (30),
-                             #TRANS: Blitz chess 3 minutes between moves
+                             # TRANS: Blitz chess 3 minutes between moves
                              _('Blitz: %d minutes') % (3),
-                             #TRANS: Tournament chess 10 minutes between moves
+                             # TRANS: Tournament chess 10 minutes between moves
                              _('Tournament: %d minutes') % (10)]
         self.timer_palette = self.timer_button.get_palette()
 
@@ -590,11 +597,11 @@ class GNUChessActivity(activity.Activity):
 
     def tag_pairs(self):
         ''' Tag paris must be ascii '''
-        if type(self.nick) == unicode:
+        if type(self.nick) == str:
             nick = self.nick.encode('ascii', 'replace')
         else:
             nick = self.nick
-        if self.buddy is not None and type(self.buddy) == unicode:
+        if self.buddy is not None and type(self.buddy) == str:
             buddy = self.buddy.encode('ascii', 'replace')
         else:
             buddy = self.buddy
@@ -801,16 +808,16 @@ class GNUChessActivity(activity.Activity):
         self.tubes_chan = self._shared_activity.telepathy_tubes_chan
         self.text_chan = self._shared_activity.telepathy_text_chan
 
-        self.tubes_chan[telepathy.CHANNEL_TYPE_TUBES].connect_to_signal(
+        self.tubes_chan[CHANNEL_TYPE_TUBES].connect_to_signal(
             'NewTube', self._new_tube_cb)
 
         if sharer:
             _logger.debug('This is my activity: making a tube...')
-            self.tubes_chan[telepathy.CHANNEL_TYPE_TUBES].OfferDBusTube(
+            self.tubes_chan[CHANNEL_TYPE_TUBES].OfferDBusTube(
                 SERVICE, {})
         else:
             _logger.debug('I am joining an activity: waiting for a tube...')
-            self.tubes_chan[telepathy.CHANNEL_TYPE_TUBES].ListTubes(
+            self.tubes_chan[CHANNEL_TYPE_TUBES].ListTubes(
                 reply_handler=self._list_tubes_reply_cb,
                 error_handler=self._list_tubes_error_cb)
 
@@ -839,10 +846,10 @@ class GNUChessActivity(activity.Activity):
                       'params=%r state=%d' %
                       (id, initiator, type, service, params, state))
 
-        if (type == telepathy.TUBE_TYPE_DBUS and service == SERVICE):
-            if state == telepathy.TUBE_STATE_LOCAL_PENDING:
+        if (type == TUBE_TYPE_DBUS and service == SERVICE):
+            if state == TelepathyGLib.TubeState.LOCAL_PENDING:
                 self.tubes_chan[
-                    telepathy.CHANNEL_TYPE_TUBES].AcceptDBusTube(id)
+                    CHANNEL_TYPE_TUBES].AcceptDBusTube(id)
 
             self.collab = CollabWrapper(self)
             self.collab.message.connect(self.event_received_cb)
@@ -864,7 +871,7 @@ class GNUChessActivity(activity.Activity):
             'C': [self._receive_colors, 'receive colors from opponent'],
             'j': [self._receive_join, 'receive new joiner'],
             'p': [self._receive_piece, 'receive new piece'],
-            }
+        }
 
     def event_received_cb(self, collab, buddy, msg):
         ''' Data from a tube has arrived. '''
@@ -1026,4 +1033,3 @@ class GNUChessActivity(activity.Activity):
                                   width=self._gnuchess.scale,
                                   height=self._gnuchess.scale)
         return piece, pixbuf
-
