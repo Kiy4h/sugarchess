@@ -132,8 +132,6 @@ class Gnuchess():
 
     def move(self, my_move):
         ''' Send a command to gnuchess. '''
-        # Permission to play
-        os.system('chmod -R 755 bin')
         p = subprocess.Popen(['{}/{}/gnuchess'.format(self._bundle_path,
                                                       self._bin_path)],
                              stdin=subprocess.PIPE,
