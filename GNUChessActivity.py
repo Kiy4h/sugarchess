@@ -38,18 +38,12 @@ from utils import json_load, json_dump, get_hardware, \
 
 from gi.repository import TelepathyGLib
 
-CHANNEL_TYPE_TUBES = TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES
-TUBE_TYPE_DBUS = TelepathyGLib.IFACE_CHANNEL_TYPE_DBUS_TUBE
-
 import dbus
 from dbus.service import signal
 from dbus.gobject_service import ExportedGObject
 from sugar3.presence import presenceservice
 
-try:
-    from sugar3.presence.wrapper import CollabWrapper
-except ImportError:
-    from textchannelwrapper import CollabWrapper
+from textchannelwrapper import CollabWrapper
 
 
 from gettext import gettext as _
@@ -57,12 +51,13 @@ from gettext import gettext as _
 from chess import Gnuchess
 
 import logging
-_logger = logging.getLogger('gnuchess-activity')
 
+_logger = logging.getLogger('GNUChessActivity')
+_logger.setLevel(logging.DEBUG)
 
 SERVICE = 'org.sugarlabs.GNUChessActivity'
 IFACE = SERVICE
-PATH = '/org/augarlabs/GNUChessActivity'
+PATH = '/org/sugarlabs/GNUChessActivity'
 
 PIECES = {'pawn': {'white': _('White Pawn'), 'black': _('Black Pawn')},
           'rook': {'white': _('White Rook'), 'black': _('Black Rook')},
@@ -263,7 +258,7 @@ class GNUChessActivity(activity.Activity):
                                      self.do_sugar_skin_cb,
                                      tooltip=_('Sugar-style pieces'),
                                      group=skin_button1)
-        xocolors = XoColor(self.colors)
+        xocolors = XoColor(','.join(self.colors))
         icon = Icon(icon_name='white-knight-sugar', xo_color=xocolors)
         icon.show()
         skin_button2.set_icon_widget(icon)
@@ -431,8 +426,7 @@ class GNUChessActivity(activity.Activity):
 
     def _timer_button_cb(self, button):
         if not self.timer_palette.is_up() and not self.timer_panel_visible:
-            self.timer_palette.popup(
-                immediate=True, state=self.timer_palette.SECONDARY)
+            self.timer_palette.popup(immediate=True)
             self.timer_panel_visible = True
         else:
             self.timer_palette.popdown(immediate=True)
@@ -797,27 +791,27 @@ class GNUChessActivity(activity.Activity):
 
     def _new_tube_common(self, sharer):
         ''' Joining and sharing are mostly the same... '''
-        if self._shared_activity is None:
-            _logger.debug("Error: Failed to share or join activity ... \
-                _shared_activity is null in _shared_cb()")
+        shared_activity = self.get_shared_activity()
+        if shared_activity is None:
+            _logger.error('Failed to share or join activity')
             return
 
         self.initiating = sharer
 
-        self.conn = self._shared_activity.telepathy_conn
-        self.tubes_chan = self._shared_activity.telepathy_tubes_chan
-        self.text_chan = self._shared_activity.telepathy_text_chan
+        self.conn = shared_activity.telepathy_conn
+        self.tubes_chan = shared_activity.telepathy_tubes_chan
+        self.text_chan = shared_activity.telepathy_text_chan
 
-        self.tubes_chan[CHANNEL_TYPE_TUBES].connect_to_signal(
+        self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].connect_to_signal(
             'NewTube', self._new_tube_cb)
 
         if sharer:
             _logger.debug('This is my activity: making a tube...')
-            self.tubes_chan[CHANNEL_TYPE_TUBES].OfferDBusTube(
+            self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].OfferDBusTube(
                 SERVICE, {})
         else:
             _logger.debug('I am joining an activity: waiting for a tube...')
-            self.tubes_chan[CHANNEL_TYPE_TUBES].ListTubes(
+            self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].ListTubes(
                 reply_handler=self._list_tubes_reply_cb,
                 error_handler=self._list_tubes_error_cb)
 
@@ -825,6 +819,7 @@ class GNUChessActivity(activity.Activity):
         self.restoring = True
         self.playing_robot = False
         self.human_button.set_active(True)
+        self.robot_button.set_active(False)
         self.restoring = False
 
         self.easy_button.set_sensitive(False)
@@ -842,14 +837,14 @@ class GNUChessActivity(activity.Activity):
 
     def _new_tube_cb(self, id, initiator, type, service, params, state):
         ''' Create a new tube. '''
-        _logger.debug('New tube: ID=%d initator=%d type=%d service=%s '
-                      'params=%r state=%d' %
+        _logger.debug('New tube: ID=%d initator=%d type=%d service=%s'
+                      ' params=%r state=%d' %
                       (id, initiator, type, service, params, state))
 
-        if (type == TUBE_TYPE_DBUS and service == SERVICE):
+        if (type == TelepathyGLib.TubeType.DBUS and service == SERVICE):
             if state == TelepathyGLib.TubeState.LOCAL_PENDING:
-                self.tubes_chan[
-                    CHANNEL_TYPE_TUBES].AcceptDBusTube(id)
+                self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].AcceptDBusTube(
+                    id)
 
             self.collab = CollabWrapper(self)
             self.collab.message.connect(self.event_received_cb)
@@ -876,9 +871,6 @@ class GNUChessActivity(activity.Activity):
     def event_received_cb(self, collab, buddy, msg):
         ''' Data from a tube has arrived. '''
         command = msg.get("command")
-        if action is None:
-            return
-
         payload = msg.get("payload")
         self._processing_methods[command][0](payload)
 

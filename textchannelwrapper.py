@@ -392,7 +392,7 @@ class CollabWrapper(GObject.GObject):
         '''
         return CLIENT + '.' + self.activity.get_bundle_id()
 
-    @GObject.Property
+    @GObject.property
     def leader(self):
         '''
         Boolean of if this client is the leader in this activity.  The
@@ -401,7 +401,7 @@ class CollabWrapper(GObject.GObject):
         '''
         return self._leader
 
-    @GObject.Property
+    @GObject.property
     def owner(self):
         '''
         Ourselves, :class:`sugar3.presence.buddy.Owner`

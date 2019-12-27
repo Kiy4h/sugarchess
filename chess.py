@@ -18,7 +18,7 @@ import subprocess
 from gettext import gettext as _
 
 import logging
-_logger = logging.getLogger('gnuchess-activity')
+_logger = logging.getLogger('GNUChessActivity')
 
 from sprites import Sprites, Sprite
 from piece import svg_header, svg_footer, svg_king, svg_queen, svg_bishop, \
@@ -489,7 +489,8 @@ class Gnuchess():
             return True
         last_move = self.game.split()[-1]
         if self.we_are_sharing:
-            self._activity.send_event('m|%s' % (last_move))
+            _logger.debug('send_event: m|%s' % (last_move))
+            self._activity.send_event('m', last_move)
         if '+' in last_move:
             self.check = True
             self._activity.status.set_label(_('Check'))
@@ -734,7 +735,7 @@ class Gnuchess():
                             if move[3] in RANKS:
                                 capture_rank = move[3]
         if capture:
-            move = move[find(move, 'x') + 1:]
+            move = move[move.find('x') + 1:]
             if white:
                 if move[0] in 'KQBNR':
                     # capture_piece = move[0]
