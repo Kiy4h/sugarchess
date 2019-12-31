@@ -287,7 +287,7 @@ class Gnuchess():
         if self._activity.playing_robot and not self._activity.playing_white:
             self.move(ROBOT)
 
-        if self.we_are_sharing and self._activity.initiating:
+        if self.we_are_sharing and self._activity.collab.props.leader:
             self._activity.send_new_game()
 
     def restore_game(self, move_list):
@@ -314,7 +314,7 @@ class Gnuchess():
                         _("Black's King is in check."))
                 self._show_check()
 
-        if self.we_are_sharing and self._activity.initiating:
+        if self.we_are_sharing and self._activity.collab.props.leader:
             self._activity.send_restore()
 
     def copy_game(self):
@@ -489,7 +489,6 @@ class Gnuchess():
             return True
         last_move = self.game.split()[-1]
         if self.we_are_sharing:
-            _logger.debug('send_event: m|%s' % (last_move))
             self._activity.send_event('m', last_move)
         if '+' in last_move:
             self.check = True

@@ -36,15 +36,7 @@ from toolbar_utils import button_factory, label_factory, separator_factory, \
 from utils import json_load, json_dump, get_hardware, \
     pixbuf_to_base64, base64_to_pixbuf
 
-from gi.repository import TelepathyGLib
-
-import dbus
-from dbus.service import signal
-from dbus.gobject_service import ExportedGObject
-from sugar3.presence import presenceservice
-
 from textchannelwrapper import CollabWrapper
-
 
 from gettext import gettext as _
 
@@ -54,10 +46,6 @@ import logging
 
 _logger = logging.getLogger('GNUChessActivity')
 _logger.setLevel(logging.DEBUG)
-
-SERVICE = 'org.sugarlabs.GNUChessActivity'
-IFACE = SERVICE
-PATH = '/org/sugarlabs/GNUChessActivity'
 
 PIECES = {'pawn': {'white': _('White Pawn'), 'black': _('Black Pawn')},
           'rook': {'white': _('White Rook'), 'black': _('Black Rook')},
@@ -83,6 +71,9 @@ class GNUChessActivity(activity.Activity):
         self.playing_robot = True
         self.showing_game_history = False
         self._restoring = True
+        self.stopwatch_running = False
+        self.time_interval = None
+        self.timer_panel_visible = False
 
         self.nick = profile.get_nick_name()
         if profile.get_color() is not None:
@@ -110,34 +101,31 @@ class GNUChessActivity(activity.Activity):
                                   path=activity.get_bundle_path(),
                                   colors=self.colors)
 
-        if self.shared_activity:
-            # We're joining
-            if not self.get_shared():
-                xocolors = XoColor(profile.get_color().to_string())
-                share_icon = Icon(icon_name='zoom-neighborhood',
-                                  xo_color=xocolors)
+        self.connect('shared', self._shared_cb)
+        self.connect('joined', self._joined_cb)
+        self._restoring = False
 
-                self._joined_alert = NotifyAlert()
-                self._joined_alert.props.icon = share_icon
-                self._joined_alert.props.title = _('Please wait')
-                self._joined_alert.props.msg = _('Starting connection...')
-                self._joined_alert.connect('response', self._alert_cancel_cb)
-                self.add_alert(self._joined_alert)
+        self.collab = CollabWrapper(self)
+        self.collab.connect('message', self._message_cb)
+        self.collab.connect('joined', self._joined_cb)
+        self.collab.setup()
 
-                # Wait for joined signal
-                self.connect("joined", self._joined_cb)
-
-        self._setup_presence_service()
-
-        self.stopwatch_running = False
-        self.time_interval = None
-        self.timer_panel_visible = False
+        # Send the nick to our opponent
+        if not self.collab.props.leader:
+            self.send_nick()
+            # And let the sharer know we've joined
+            self.send_join()
 
         if self.game_data is not None:  # 'saved_game' in self.metadata:
             self._restore()
         else:
             self._gnuchess.new_game()
-        self._restoring = False
+
+    def set_data(self, data):
+        pass
+
+    def get_data(self):
+        return None
 
     def _alert_cancel_cb(self, alert, response_id):
         self.remove_alert(alert)
@@ -258,7 +246,7 @@ class GNUChessActivity(activity.Activity):
                                      self.do_sugar_skin_cb,
                                      tooltip=_('Sugar-style pieces'),
                                      group=skin_button1)
-        xocolors = XoColor(','.join(self.colors))
+        xocolors = XoColor(self.colors)
         icon = Icon(icon_name='white-knight-sugar', xo_color=xocolors)
         icon.show()
         skin_button2.set_icon_widget(icon)
@@ -489,10 +477,10 @@ class GNUChessActivity(activity.Activity):
     def _show_history_cb(self, button):
         self._gnuchess.show_game_history(self.tag_pairs())
         if self.showing_game_history:
-            self.history_button.set_icon('checkerboard')
+            self.history_button.set_icon_name('checkerboard')
             self.history_button.set_tooltip(_('Show game board'))
         else:
-            self.history_button.set_icon('list-numbered')
+            self.history_button.set_icon_name('list-numbered')
             self.history_button.set_tooltip(_('Show game history'))
         return
 
@@ -537,7 +525,7 @@ class GNUChessActivity(activity.Activity):
 
     def _undo_cb(self, *args):
         # No undo while sharing
-        if self.initiating is None:
+        if self.collab.props.leader is None:
             self._gnuchess.undo()
 
     def _hint_cb(self, *args):
@@ -740,7 +728,7 @@ class GNUChessActivity(activity.Activity):
     def _new_game_alert(self, button):
         ''' We warn the user if the game is in progress before loading
         a new game. '''
-        if self.initiating is not None and not self.initiating:
+        if self.collab.props.leader is not None and not self.collab.props.leader:
             # joiner cannot push buttons
             self._restoring = True
             self._no_action(button)
@@ -770,51 +758,20 @@ class GNUChessActivity(activity.Activity):
 
     # Collaboration-related methods
 
-    def _setup_presence_service(self):
-        ''' Setup the Presence Service. '''
-        self.pservice = presenceservice.get_instance()
-        self.initiating = None  # sharing (True) or joining (False)
-
-        owner = self.pservice.get_owner()
-        self.owner = owner
-        self._share = ""
-        self.connect('shared', self._shared_cb)
-        self.connect('joined', self._joined_cb)
-
     def _shared_cb(self, activity):
         ''' Either set up initial share...'''
-        self._new_tube_common(True)
+        _logger.debug('shared')
+        self.after_share_join(True)
 
     def _joined_cb(self, activity):
         ''' ...or join an exisiting share. '''
-        self._new_tube_common(False)
+        _logger.debug('joined')
+        self.after_share_join(False)
+        self.send_nick()
+        # And let the sharer know we've joined
+        self.send_join()
 
-    def _new_tube_common(self, sharer):
-        ''' Joining and sharing are mostly the same... '''
-        shared_activity = self.get_shared_activity()
-        if shared_activity is None:
-            _logger.error('Failed to share or join activity')
-            return
-
-        self.initiating = sharer
-
-        self.conn = shared_activity.telepathy_conn
-        self.tubes_chan = shared_activity.telepathy_tubes_chan
-        self.text_chan = shared_activity.telepathy_text_chan
-
-        self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].connect_to_signal(
-            'NewTube', self._new_tube_cb)
-
-        if sharer:
-            _logger.debug('This is my activity: making a tube...')
-            self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].OfferDBusTube(
-                SERVICE, {})
-        else:
-            _logger.debug('I am joining an activity: waiting for a tube...')
-            self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].ListTubes(
-                reply_handler=self._list_tubes_reply_cb,
-                error_handler=self._list_tubes_error_cb)
-
+    def after_share_join(self, sharer):
         self._gnuchess.set_sharing(True)
         self.restoring = True
         self.playing_robot = False
@@ -825,36 +782,6 @@ class GNUChessActivity(activity.Activity):
         self.easy_button.set_sensitive(False)
         self.hard_button.set_sensitive(False)
         self.robot_button.set_sensitive(False)
-
-    def _list_tubes_reply_cb(self, tubes):
-        ''' Reply to a list request. '''
-        for tube_info in tubes:
-            self._new_tube_cb(*tube_info)
-
-    def _list_tubes_error_cb(self, e):
-        ''' Log errors. '''
-        _logger.debug('Error: ListTubes() failed: %s' % (e))
-
-    def _new_tube_cb(self, id, initiator, type, service, params, state):
-        ''' Create a new tube. '''
-        _logger.debug('New tube: ID=%d initator=%d type=%d service=%s'
-                      ' params=%r state=%d' %
-                      (id, initiator, type, service, params, state))
-
-        if (type == TelepathyGLib.TubeType.DBUS and service == SERVICE):
-            if state == TelepathyGLib.TubeState.LOCAL_PENDING:
-                self.tubes_chan[TelepathyGLib.IFACE_CHANNEL_TYPE_TUBES].AcceptDBusTube(
-                    id)
-
-            self.collab = CollabWrapper(self)
-            self.collab.message.connect(self.event_received_cb)
-            self.collab.setup()
-
-        # Now that we have a tube, send the nick to our opponent
-        if not self.initiating:
-            self.send_nick()
-            # And let the sharer know we've joined
-            self.send_join()
 
     def _setup_dispatch_table(self):
         ''' Associate tokens with commands. '''
@@ -868,7 +795,7 @@ class GNUChessActivity(activity.Activity):
             'p': [self._receive_piece, 'receive new piece'],
         }
 
-    def event_received_cb(self, collab, buddy, msg):
+    def _message_cb(self, collab, buddy, msg):
         ''' Data from a tube has arrived. '''
         command = msg.get("command")
         payload = msg.get("payload")
@@ -876,7 +803,7 @@ class GNUChessActivity(activity.Activity):
 
     def send_new_game(self):
         ''' Send a new game to joiner. '''
-        if not self.initiating:
+        if not self.collab.props.leader:
             return
         self.send_nick()
         if self.playing_white:
@@ -888,14 +815,14 @@ class GNUChessActivity(activity.Activity):
 
     def send_restore(self):
         ''' Send a new game to joiner. '''
-        if not self.initiating:
+        if not self.collab.props.leader:
             return
         _logger.debug('send_restore')
         self.send_event("r", self._gnuchess.copy_game())
 
     def send_join(self):
         _logger.debug('send_join')
-        self.send_event("j", self.nick)
+        self.send_event('j', self.nick)
 
     def send_nick(self):
         _logger.debug('send_nick')
@@ -933,7 +860,7 @@ class GNUChessActivity(activity.Activity):
 
     def _receive_join(self, payload):
         _logger.debug('received_join %s' % (payload))
-        if self.initiating:
+        if self.collab.props.leader:
             self.send_new_game()
             _logger.debug(self.game_data)
             if self.game_data is not None:
@@ -943,7 +870,7 @@ class GNUChessActivity(activity.Activity):
         _logger.debug('received_nick %s' % (payload))
         self.buddy = payload
         self.opponent.set_label(self.buddy)
-        if self.initiating:
+        if self.collab.props.leader:
             self.send_nick()
 
     def _receive_colors(self, payload):
@@ -957,7 +884,7 @@ class GNUChessActivity(activity.Activity):
 
     def _receive_restore(self, payload):
         ''' Get game state from sharer. '''
-        if self.initiating:
+        if self.collab.props.leader:
             return
         _logger.debug('received_restore %s' % (payload))
         self._gnuchess.restore_game(self._parse_move_list(payload))
@@ -969,8 +896,9 @@ class GNUChessActivity(activity.Activity):
 
     def _receive_new_game(self, payload):
         ''' Sharer can start a new gnuchess. '''
-        _logger.debug('received_new_game %s' % (payload))
-        if self.initiating:
+        _logger.debug('receive_new_game %s' % (payload))
+        # The leader cannot receive new game
+        if self.collab.props.leader:
             return
         self.send_nick()
         if payload == 'W':
