@@ -32,6 +32,8 @@ from sugar3.datastore import datastore
 from sugar3 import mime
 from sugar3 import profile
 
+from sugarapp.widgets import SugarCompatibleActivity
+
 from toolbar_utils import button_factory, label_factory, separator_factory, \
     radio_factory, entry_factory
 from utils import json_load, json_dump, get_hardware, \
@@ -59,7 +61,7 @@ PIECES = {'pawn': {'white': _('White Pawn'), 'black': _('Black Pawn')},
           'king': {'white': _('White King'), 'black': _('Black King')}}
 
 
-class GNUChessActivity(activity.Activity):
+class GNUChessActivity(SugarCompatibleActivity):
     ''' Gnuchess interface from Sugar '''
 
     def __init__(self, handle):
